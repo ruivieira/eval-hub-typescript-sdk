@@ -1,0 +1,22 @@
+{
+  "name": "@rui/eval-hub-typescript-sdk",
+  "version": "0.1.0",
+  "description": "Runtime-independent TypeScript client for EvalHub",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/mod.ts",
+      "default": "./src/mod.ts"
+    }
+  },
+  "files": ["src", "README.md", "LICENSE"],
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.3"
+  }
+}
