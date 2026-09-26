@@ -26,22 +26,27 @@ health and lists providers. Applications can also construct an `EvalHubClient`
 directly:
 
 ```ts
-import { EvalHubClient } from "@jsr/rui__eval-hub-typescript-sdk";
+import * as eval_hub_typescript_sdk from "@rui/eval-hub-typescript-sdk";
 
-const client = new EvalHubClient({
+const client = new eval_hub_typescript_sdk.EvalHubClient({
   baseUrl: Bun.env.EVALHUB_URL ?? "http://localhost:8080",
   authToken: Bun.env.EVALHUB_TOKEN,
   tenant: Bun.env.EVALHUB_TENANT,
 });
+
+const health = await client.health();
+console.log("EvalHub health:", health.status);
 
 const providers = await client.providers.list({ targetType: "agent" });
 console.log(providers);
 ```
 
 Pass credentials explicitly; the portable client does not read environment
-variables, token files, or Kubernetes service-account mounts. For custom
-transports and tests, inject a standard Fetch-compatible function with the
-`fetch` option. Request methods also accept an `AbortSignal`.
+variables, token files, or Kubernetes service-account mounts. `health()` returns
+a typed `HealthResponse`. For custom transports and tests, inject a standard
+Fetch-compatible function with the `fetch` option. Request methods also accept
+an `AbortSignal`. Set `maxResponseBytes` to enforce an optional response-body
+size limit; oversized responses raise `EvalHubResponseTooLargeError`.
 
 Automatic retries default to `GET`, `HEAD`, and `OPTIONS` only, avoiding
 accidental duplicate job submissions or other writes after ambiguous failures.
@@ -50,21 +55,20 @@ operation is safe and idempotent for your API use case.
 
 ## Install
 
-Once published, Bun, Node.js, and other npm-compatible runtimes can install the
-JSR-generated npm package:
+Install the JSR package with Bun:
 
 ```sh
-bun add @jsr/rui__eval-hub-typescript-sdk
+bunx jsr add @rui/eval-hub-typescript-sdk
 ```
 
-The JSR package name is `@rui/eval-hub-typescript-sdk`; `@rui` is the same JSR
-scope used by White Rabbit. Its npm compatibility name is
-`@jsr/rui__eval-hub-typescript-sdk`. This checkout has not been published yet.
+Import it using its JSR package name, `@rui/eval-hub-typescript-sdk`. For npm-
+compatible package managers, JSR also exposes
+`@jsr/rui__eval-hub-typescript-sdk` through `https://npm.jsr.io`; configure the
+`@jsr` scope to use that registry. The current published JSR release is `0.1.0`.
 
 ## Releasing
 
 The `Publish to JSR` GitHub Actions workflow publishes on version tags such as
-`v0.1.0`. It derives the package version from the tag, runs type checks, tests,
-formatting, and linting, then publishes using GitHub Actions OIDC. Ensure the
-`@rui` JSR scope is associated with this GitHub account/repository before the
-first release; no JSR token is stored as a GitHub secret.
+`vX.Y.Z`. It derives the package version from the tag, runs type checks, tests,
+formatting, and linting, then publishes using GitHub Actions OIDC. No JSR token
+is stored as a GitHub secret.

@@ -1,11 +1,13 @@
 export {
   EvalHubClient,
   EvalHubHttpError,
+  EvalHubResponseTooLargeError,
   JobCannotBeCancelledError,
   JobNotFoundError,
 } from "./client.ts";
 export type {
   EvalHubClientOptions,
+  EvalHubRequestOptions,
   ListBenchmarkOptions,
   ListProviderOptions,
 } from "./client.ts";
@@ -17,6 +19,7 @@ export type {
   Collection,
   CollectionRef,
   EvaluationJob,
+  HealthResponse,
   JobListOptions,
   JobStatus,
   JobSubmissionRequest,
