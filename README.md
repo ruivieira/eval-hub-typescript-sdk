@@ -64,7 +64,7 @@ bunx jsr add @rui/eval-hub-typescript-sdk
 Import it using its JSR package name, `@rui/eval-hub-typescript-sdk`. For npm-
 compatible package managers, JSR also exposes
 `@jsr/rui__eval-hub-typescript-sdk` through `https://npm.jsr.io`; configure the
-`@jsr` scope to use that registry. The current published JSR release is `0.1.0`.
+`@jsr` scope to use that registry. The current release is `0.1.1`.
 
 ## Releasing
 
