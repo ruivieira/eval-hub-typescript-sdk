@@ -2,6 +2,7 @@ import type {
   Benchmark,
   Collection,
   EvaluationJob,
+  HealthResponse,
   JobListOptions,
   JobStatus,
   JobSubmissionRequest,
@@ -27,6 +28,8 @@ export interface EvalHubClientOptions {
   retryRandomization?: boolean;
   /** HTTP methods eligible for automatic retry. Defaults to GET, HEAD, and OPTIONS. */
   retryMethods?: readonly string[];
+  /** Optional maximum number of response-body bytes accepted from the service. */
+  maxResponseBytes?: number;
   /** Inject Fetch for tests or custom transports; defaults to the runtime's global fetch. */
   fetch?: FetchFunction;
 }
@@ -56,6 +59,16 @@ export class EvalHubHttpError extends Error {
   }
 }
 
+export class EvalHubResponseTooLargeError extends Error {
+  readonly maxBytes: number;
+
+  constructor(maxBytes: number) {
+    super(`EvalHub response exceeded the configured ${maxBytes}-byte limit`);
+    this.name = "EvalHubResponseTooLargeError";
+    this.maxBytes = maxBytes;
+  }
+}
+
 export class JobNotFoundError extends Error {
   readonly jobId: string;
 
@@ -79,10 +92,46 @@ export class JobCannotBeCancelledError extends Error {
   }
 }
 
-interface RequestConfig extends RequestOptions {
+export interface EvalHubRequestOptions extends RequestOptions {
   method?: string;
   query?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
+}
+
+async function readResponseText(
+  response: Response,
+  maxBytes?: number,
+): Promise<string> {
+  if (maxBytes === undefined) return response.text();
+
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new EvalHubResponseTooLargeError(maxBytes);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
 }
 
 /** Async-only, Fetch-based EvalHub REST client. No runtime-specific APIs are used. */
@@ -103,6 +152,7 @@ export class EvalHubClient {
   private readonly retryBackoffFactor: number;
   private readonly retryRandomization: boolean;
   private readonly retryMethods: ReadonlySet<string>;
+  private readonly maxResponseBytes?: number;
   private readonly fetchImpl: FetchFunction;
 
   constructor(options: EvalHubClientOptions = {}) {
@@ -119,6 +169,7 @@ export class EvalHubClient {
     this.retryMaxDelayMs = options.retryMaxDelayMs ?? 60_000;
     this.retryBackoffFactor = options.retryBackoffFactor ?? 2;
     this.retryRandomization = options.retryRandomization ?? true;
+    this.maxResponseBytes = options.maxResponseBytes;
     this.retryMethods = new Set(
       (options.retryMethods ?? ["GET", "HEAD", "OPTIONS"]).map((method) =>
         method.toUpperCase()
@@ -130,6 +181,13 @@ export class EvalHubClient {
     if (!Number.isInteger(this.maxRetries) || this.maxRetries < 0) {
       throw new RangeError("maxRetries must be a non-negative integer");
     }
+    if (
+      this.maxResponseBytes !== undefined &&
+      (!Number.isSafeInteger(this.maxResponseBytes) ||
+        this.maxResponseBytes < 1)
+    ) {
+      throw new RangeError("maxResponseBytes must be a positive safe integer");
+    }
 
     this.providers = new ProvidersResource(this);
     this.benchmarks = new BenchmarksResource(this);
@@ -138,12 +196,15 @@ export class EvalHubClient {
   }
 
   /** Check the EvalHub service health endpoint. */
-  health(options: RequestOptions = {}): Promise<Record<string, unknown>> {
-    return this.request("/health", options);
+  health(options: RequestOptions = {}): Promise<HealthResponse> {
+    return this.request<HealthResponse>("/health", options);
   }
 
   /** Make an API request. Exposed for the resource classes and advanced use. */
-  async request<T>(path: string, config: RequestConfig = {}): Promise<T> {
+  async request<T>(
+    path: string,
+    config: EvalHubRequestOptions = {},
+  ): Promise<T> {
     const url = new URL(`${this.apiBase}${path}`);
     for (const [key, value] of Object.entries(config.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
@@ -186,13 +247,21 @@ export class EvalHubClient {
           throw new EvalHubHttpError(
             response.status,
             url.toString(),
-            await response.text(),
+            await readResponseText(response, this.maxResponseBytes),
           );
         }
         if (response.status === 204) return undefined as T;
-        return await response.json() as T;
+        if (this.maxResponseBytes === undefined) {
+          return await response.json() as T;
+        }
+        return JSON.parse(
+          await readResponseText(response, this.maxResponseBytes),
+        ) as T;
       } catch (error) {
-        if (config.signal?.aborted) throw error;
+        if (
+          config.signal?.aborted ||
+          error instanceof EvalHubResponseTooLargeError
+        ) throw error;
         if (error instanceof EvalHubHttpError) {
           if (error.status < 500 || !canRetry || attempt === this.maxRetries) {
             throw error;

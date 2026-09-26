@@ -9,6 +9,11 @@ export type JsonValue =
   | JsonObject
   | JsonValue[];
 
+export interface HealthResponse {
+  status: string;
+  [key: string]: unknown;
+}
+
 export type JobStatus =
   | "pending"
   | "running"

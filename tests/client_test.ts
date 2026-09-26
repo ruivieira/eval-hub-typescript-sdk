@@ -1,5 +1,9 @@
 import { test } from "bun:test";
-import { EvalHubClient, EvalHubHttpError } from "../src/mod.ts";
+import {
+  EvalHubClient,
+  EvalHubHttpError,
+  EvalHubResponseTooLargeError,
+} from "../src/mod.ts";
 
 function assertEquals<T>(
   actual: T,
@@ -50,6 +54,85 @@ test("client adds auth and tenant headers and normalizes base URL", async () => 
   assertEquals(requestedHeaders?.get("authorization"), "Bearer secret");
   assertEquals(requestedHeaders?.get("x-tenant"), "team-a");
   assertEquals(result, { status: "ok" });
+});
+
+test("health has a typed response and accepts a bounded response body", async () => {
+  const client = new EvalHubClient({
+    maxResponseBytes: 32,
+    fetch: () => Promise.resolve(Response.json({ status: "healthy" })),
+  });
+
+  const health = await client.health();
+  assertEquals(health.status, "healthy");
+});
+
+test("response size limits apply to successful bodies and do not retry", async () => {
+  let calls = 0;
+  const client = new EvalHubClient({
+    maxRetries: 2,
+    maxResponseBytes: 8,
+    retryInitialDelayMs: 0,
+    fetch: () => {
+      calls++;
+      return Promise.resolve(Response.json({ status: "healthy" }));
+    },
+  });
+
+  await assertRejects(
+    () => client.health(),
+    EvalHubResponseTooLargeError,
+    "8-byte",
+  );
+  assertEquals(calls, 1);
+});
+
+test("response size limits apply to error bodies and do not retry", async () => {
+  let calls = 0;
+  const client = new EvalHubClient({
+    maxRetries: 2,
+    maxResponseBytes: 4,
+    retryInitialDelayMs: 0,
+    fetch: () => {
+      calls++;
+      return Promise.resolve(new Response("error", { status: 503 }));
+    },
+  });
+
+  await assertRejects(
+    () => client.providers.list(),
+    EvalHubResponseTooLargeError,
+    "4-byte",
+  );
+  assertEquals(calls, 1);
+});
+
+test("response size limit must be a positive safe integer", () => {
+  try {
+    new EvalHubClient({ maxResponseBytes: 0 });
+  } catch (error) {
+    if (
+      error instanceof RangeError &&
+      error.message.includes("positive safe integer")
+    ) return;
+    throw error;
+  }
+  throw new Error("Expected maxResponseBytes validation failure");
+});
+
+test("request exposes its method options for typed advanced calls", async () => {
+  const client = new EvalHubClient({
+    maxRetries: 0,
+    fetch: (_input, init) => {
+      assertEquals(init?.method, "POST");
+      return Promise.resolve(new Response("not allowed", { status: 405 }));
+    },
+  });
+
+  await assertRejects(
+    () => client.request("/health", { method: "POST" }),
+    EvalHubHttpError,
+    "HTTP 405",
+  );
 });
 
 test("provider list applies client-side filters and supports tenant overrides", async () => {
